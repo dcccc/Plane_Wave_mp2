@@ -1,5 +1,5 @@
 
-Read this in other languages: 日本語[readme_jp.md].
+Read this in other languages: [日本語](readme_jp.md).
 
 ## Plane Wave MP2
 A code to calculate the mp2 energy with plane-wave basis set wavefunction provided by Quantum Espresso (QE)[1]. The code is written with python, and the purpose is to get a better understanding about plane-wave basis method.
