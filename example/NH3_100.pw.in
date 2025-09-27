@@ -1,0 +1,58 @@
+
+ &CONTROL 
+              calculation = 'scf',
+                  tstress = .false.,
+                  tprnfor = .false.,
+             restart_mode = 'from_scratch',
+                   outdir = './',
+               pseudo_dir = './',
+                   prefix = 'NH3',
+                  disk_io = 'low',
+            etot_conv_thr = 0.00010000,
+            forc_conv_thr = 0.00100000,
+                    nstep = 0,
+ /                                       
+ &SYSTEM  
+                    ibrav = 0,
+                      nat = 4,
+                     ntyp = 2,
+               tot_charge = 0.00000000,
+                  ecutwfc = 150,
+              occupations = 'fixed',
+                  degauss = 0.01000000,
+                 smearing = 'gaussian',
+                    nspin = 1,
+                input_dft = 'HF',
+nbnd=100,
+! nqx1=1, nqx2=1, nqx3=1,
+starting_magnetization(1) = 0.20000000,
+starting_magnetization(2) = 0.20000000,
+  /                                       
+ &ELECTRONS 
+         electron_maxstep = 60,
+                 conv_thr = 0.00000100,
+              mixing_beta = 0.70000000,
+              mixing_mode = 'local-TF',
+          diagonalization = 'david',
+  /                                       
+ &IONS  
+             ion_dynamics = 'bfgs',
+/
+ &CELL
+            cell_dynamics = 'bfgs',
+                    press = 0.00000000,
+ /                                       
+ATOMIC_SPECIES
+N      14.0    N_hgh_pbe.upf
+H       1.0    H_hgh_pbe.upf
+CELL_PARAMETERS angstrom
+  15.4     0.00000000     0.00000000
+  0.00000000     15.4     0.00000000
+  0.00000000     0.00000000    15.4
+ATOMIC_POSITIONS crystal 
+N   -0.102514    -0.003027     0.000000                           
+H   -0.140170     0.008857    -0.052569 
+H   -0.140170     0.008857     0.052569 
+H   -0.055160     0.042740     0.000000 
+K_POINTS gamma 
+
