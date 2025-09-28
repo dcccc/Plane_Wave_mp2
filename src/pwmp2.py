@@ -3,6 +3,7 @@ import argparse
 import os, glob, time
 from qe import read_qe_wavefunction, get_qe_data
 import multiprocessing as mp
+from functools import partial
 
 parser = argparse.ArgumentParser(description='Calculate mp2 energy with quantum espresso calculaiton result ')
 
@@ -23,7 +24,7 @@ assert os.path.isfile(qe_xml), "QE data-file-schema.xml file not found!"
 wfc_hdf5 = "./wfc1.hdf5"
 assert os.path.isfile(wfc_hdf5), "QE wfc1.hdf5 file not found!"
 
-print("Reading QE calculation result from files: ")
+print("Reading QE calculation result from files ")
 time_start0 = time.time()
 # read wavefunction data form the xml and hdf5 files
 latt9, eigenvalues, n_occupied, grid_point = get_qe_data(qe_xml)
@@ -42,9 +43,9 @@ for  i in range(len(eigenvalues)):
 
 print("\n")
 print(f"Grid points: {grid_point}")
-print("cell volume: {volume:10.6f}")
+print("cell volume: {:10.6f}".format(volume))
 time_end = time.time()
-print(f"Time used to read QE calculation result: {:10.4f} seconds".format(time_end - time_start0))
+print("Time used to read QE calculation result: {:6d} seconds".format(int(time_end - time_start0)))
 print("\n")
 
 if args.number_of_threads > 1:
@@ -54,6 +55,45 @@ if args.number_of_threads > 1:
     except:
         pass
     os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+
+# calculate tau and weight for laplace_mp2 and stochastic_mp2 method
+if args.method in ['laplace_mp2', "stochastic_mp2"]:
+    from laplace_mp2 import get_tau
+    delta_eigen_max = eigenvalues[-1] - eigenvalues[0]
+    delta_eigen_min = eigenvalues[n_occupied+1] - eigenvalues[n_occupied]
+
+    # get the tau and weight list using the least square fitting method by
+    # minimizing the error in the range [delta_eigen_min*0.9, delta_eigen_max+1]
+    tau_list, w_list, error = get_tau(n_w=6, n_x=600, x_range=[delta_eigen_min*0.9, delta_eigen_max+1])
+    
+    print("Using laplace transformation with tau and weight: ")
+    for tau, w in zip(tau_list, w_list):
+        print("tau: {: 12.6f}   weight: {: 12.6f}".format(tau, w))
+
+    print("The average error in range [{:10.6f},  {:10.6f}] is {:10.8f}".format(delta_eigen_min*0.9,
+                                                     delta_eigen_max+1, error) )
+
+
+
+if args.method in ['laplace_mp2', "mp2"] and args.number_of_threads > 1:
+    from mp2 import task_parting
+    n_thread = args.number_of_threads
+    def psi_g2r(range_list):
+        return([np.fft.ifftn(i) for i in psi_list[range_list[0]:range_list[1]]])    
+    
+    task_idx_list = task_parting(n_unoccupied+n_occupied, n_thread)
+    pool = mp.Pool(n_thread)
+
+    results = [pool.apply_async(psi_g2r, args=(task_idx_list[i],))  
+                   for i in range(n_thread) ]    
+    pool.close()
+    pool.join()
+
+    psi_r = np.vstack([p.get() for p in results])
+time_end = time.time()
+print("Time used to calculate psi_r:       {:10d} seconds".format(int(time_end - time_start0)))
 
 
 if args.method == 'mp2':
@@ -68,7 +108,7 @@ if args.method == 'mp2':
         time_start = time.time()
         phi_ia = get_phi(psi_r, n_occupied, g2vector_mask)
         time_end = time.time()
-        print(f"Time used to calculate phi_ia: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate phi_ia:       {:10d} seconds".format(int(time_end - time_start)))
 
 
         psi_r = []
@@ -76,14 +116,14 @@ if args.method == 'mp2':
         time_start = time.time()
         eri = get_eri(phi_ia, op_coul)
         time_end = time.time()
-        print(f"Time used to calculate eri: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate eri:          {:10d} seconds".format(int(time_end - time_start)))
 
         phi_ia = []
         # calculate mp2 energy
         time_start = time.time()
         e_d, e_x = get_e(eri, eigenvalues, n_occupied)
         time_end = time.time()
-        print(f"Time used to calculate mp2 energy: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate mp2 energy:   {:10d} seconds".format(int(time_end - time_start)))
     else:
         n_thread = args.number_of_threads
         from mp2 import get_phi_pp, task_parting
@@ -104,7 +144,7 @@ if args.method == 'mp2':
         # get the results
         phi_ia = np.hstack([p.get() for p in results])
         time_end = time.time()
-        print(f"Time used to calculate phi_ia: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate phi_ia:        {:10d} seconds".format(int(time_end - time_start)))
         psi_r = []
 
         pool = mp.Pool(n_thread)
@@ -123,7 +163,7 @@ if args.method == 'mp2':
         eri = eri.transpose(1,0,2,3)
         phi_ia = []
         time_end = time.time()
-        print(f"Time used to calculate eri: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate eri:           {:10d} seconds".format(int(time_end - time_start)))
 
 
 
@@ -141,7 +181,7 @@ if args.method == 'mp2':
         emp2 = np.array([p.get() for p in results])
         e_d, e_x = np.sum(emp2, axis=0) 
         time_end = time.time()
-        print(f"Time used to get mp2 energy: {time_end - time_start:10.4f} seconds")
+        print("Time used to get mp2 energy:          {:10d} seconds".format(int(time_end - time_start)))
         
     e_d = e_d / volume**2
     e_x = e_x / volume**2
@@ -149,28 +189,14 @@ if args.method == 'mp2':
     print(f"MP2 direct energy:   {e_d: 10.8f}")
     print(f"MP2 exchange energy: {-e_x: 10.8f}")
     print(f"MP2 total energy:    {e_d - e_x: 10.8f}")
-    print("Total time used in mp2 calculation: {:10.4f} seconds".format(time_end - time_start0))
+    print("Total time used in mp2 calculation:  {:10d} seconds".format(int(time_end - time_start0)))
 
 elif args.method == 'laplace_mp2':
     from laplace_mp2 import *
     from mp2 import task_parting, get_phi
 
-    delta_eigen_max = eigenvalues[-1] - eigenvalues[0]
-    delta_eigen_min = eigenvalues[n_occupied+1] - eigenvalues[n_occupied]
 
-    # Get the tau and weight list using the least square fitting method by 
-    # minimizing the error in the range [delta_eigen_min*0.9, delta_eigen_max+1]
-    tau_list, w_list, error = get_tau(n_w=6, n_x=600, x_range=[delta_eigen_min*0.9, delta_eigen_max+1])
-    
-    print("Using laplace transformation with tau and weight: ")
-    for tau, w in zip(tau_list, w_list):
-        print("tau: {: 12.6f}   weight: {: 12.6f}".format(tau, w))
-
-    print("The average error in range [{:10.6f}  {:10.6f}] is {:10.8f}".format(delta_eigen_min*0.9
-                                                     delta_eigen_max+1, error) )
-
-
-    psi_r = np.array([np.fft.ifftn(i) for i in psi_list])
+    #psi_r = np.array([np.fft.ifftn(i) for i in psi_list])
     
 
     # The psuedo code of the fig 1 in paper 'J. Chem. Phys. 146, 104101 (2017)'
@@ -182,7 +208,7 @@ elif args.method == 'laplace_mp2':
         phi_ia = get_phi(psi_r, n_occupied, g2vector_mask)
         time_end = time.time()
         psi_r = []
-        print(f"Time used to calculate phi_ia: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate phi_ia:        {:10d} seconds".format(int(time_end - time_start)))
 
 
         # serial implementation
@@ -196,7 +222,7 @@ elif args.method == 'laplace_mp2':
                 e_x_total += e_x * w * op_coul[ng]
 
         time_end = time.time()
-        print(f"Time used to calculate laplace mp2 energy: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate laplace mp2 energy: {:10d} seconds".format(int(time_end - time_start)))
 
     else:
     
@@ -220,7 +246,7 @@ elif args.method == 'laplace_mp2':
         phi_ia = np.hstack([p.get() for p in results])
         psi_r = []
         time_end = time.time()
-        print(f"Time used to calculate phi_ia: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate phi_ia:        {:10d} seconds".format(int(time_end - time_start)))
         
         time_start = time.time()
         n_thread = args.number_of_threads
@@ -241,7 +267,7 @@ elif args.method == 'laplace_mp2':
         emp2 = np.array([p.get() for p in results])
         e_d_total, e_x_total = np.sum(emp2, axis=0) 
         time_end = time.time()
-        print(f"Time used to calculate laplace mp2 energy: {time_end - time_start:10.4f} seconds")
+        print("Time used to calculate laplace mp2 energy: {:10d} seconds".format(int(time_end - time_start)))
 
     e_d_total = e_d_total / volume**2 * 2
     e_x_total = e_x_total / volume**2
@@ -249,29 +275,14 @@ elif args.method == 'laplace_mp2':
     print(f"MP2 direct energy:   { e_d_total: 10.8f}")
     print(f"MP2 exchange energy: {-e_x_total: 10.8f}")
     print(f"MP2 total energy:    {e_d_total - e_x_total: 10.8f}")
-    print("Total time used in laplace mp2 calculation: {:10.4f} seconds".format(time_end - time_start0))
+    print("Total time used in mp2 calculation:  {:10d} seconds".format(int(time_end - time_start0)))
 
 elif args.method == "stochastic_mp2":
     from stochastic_mp2 import *
     from laplace_mp2 import get_tau
 
-    delta_eigen_max = eigenvalues[-1] - eigenvalues[0]
-    delta_eigen_min = eigenvalues[n_occupied+1] - eigenvalues[n_occupied]
-
-    # get the tau and weight list using the least square fitting method by
-    # minimizing the error in the range [delta_eigen_min*0.9, delta_eigen_max+1]
-    tau_list, w_list, error = get_tau(n_w=6, n_x=600, x_range=[delta_eigen_min*0.9, delta_eigen_max+1])
-    
-    print("Using laplace transformation with tau and weight: ")
-    for tau, w in zip(tau_list, w_list):
-        print("tau: {: 12.6f}   weight: {: 12.6f}".format(tau, w))
-
-    print("The average error in range [{:10.6f}  {:10.6f}] is {:10.8f}".format(delta_eigen_min*0.9
-                                                     delta_eigen_max+1, error) )
-
-
     # The psuedo code of the fig 1 in paper 'J. Chem. Phys. 148, 064103 (2018)'
-    n_stochastic = 1000
+    n_stochastic = 100
     n_repeat = int(args.number_of_stochastic_mp2_steps / n_stochastic)
     e_d_list = []
     e_x_list = []
@@ -324,4 +335,4 @@ elif args.method == "stochastic_mp2":
               -e_x_mean, -e_x_delta, e_d_mean - e_x_mean, e_x_delta - e_d_delta  ))
 
     time_end = time.time()
-    print("Total time used in stochastic mp2 calculation: {:10.4f} seconds".format(time_end - time_start0))
+    print("Total time used in mp2 calculation:  {:10d} seconds".format(int(time_end - time_start0)))
