@@ -23,8 +23,9 @@
                  smearing = 'gaussian',
                     nspin = 1,
                 input_dft = 'HF',
-nbnd=100,
-! nqx1=1, nqx2=1, nqx3=1,
+                     nbnd = 100,
+         exxdiv_treatment = 'none', 
+    x_gamma_extrapolation = .false.,
 starting_magnetization(1) = 0.20000000,
 starting_magnetization(2) = 0.20000000,
   /                                       
