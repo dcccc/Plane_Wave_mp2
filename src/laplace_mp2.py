@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
-
-
+import  time
+from multiprocessing.shared_memory import SharedMemory
 
 # The tau and w are calculated based on the paper:
 # "J. Chem. Phys. 96, 489–494 (1992) 10.1063/1.462485"
@@ -108,9 +108,59 @@ def get_lmp2(psi, w_list, coulomb_potential, g2vector_mask):
     
     
     return(e_d.real , e_x.real)
+
+# serial implementation
+def laplace_mp2_energy(psi_list, eigenvalues, g2vector_mask, op_coul, n_occupied, tau_list, w_list):
+
+    from mp2 import get_phi
+    e_x_total = 0.0
+    e_d_total = 0.0
+
+    time_start = time.time()
+    # transform psi from g-space to r-space
+    psi_r = np.array([np.fft.ifftn(i) for i in psi_list])
+
+    # calculate phi_ia
     
-    
-def get_lmp2_pp(psi_list, phi_ia, tau_list, w_list, eigenvalues, g2vector_mask, op_coul, ng_range=[]):
+    phi_ia = get_phi(psi_r, n_occupied, g2vector_mask)
+    time_end = time.time()
+    psi_r = []
+    print("Time used to calculate phi_ia:        {:10d} seconds".format(int(time_end - time_start)))
+
+  
+    time_start = time.time()
+    for tau, w in zip(tau_list, w_list):        
+        for ng in range(len(op_coul)):
+            w_psi_list = get_w_psi(psi_list, phi_ia, eigenvalues, g2vector_mask, ng,  tau=tau)
+            e_d, e_x= get_lmp2(psi_list, w_psi_list, op_coul, g2vector_mask)
+            e_d_total += e_d * w * op_coul[ng]
+            e_x_total += e_x * w * op_coul[ng]
+    time_end = time.time()
+    print("Time used to calculate laplace mp2 energy: {:10d} seconds".format(int(time_end - time_start)))
+    return(e_d_total, e_x_total)
+
+
+import multiprocessing as mp
+from mp2 import task_parting, psi_g2r, get_phi_pp
+
+def get_lmp2_pp(psi_name, phi_name, mask_name, op_name, psi_shape, phi_shape, tau_list, w_list, 
+                eigenvalues, ng_range=[]):
+
+    e_d_total, e_x_total = 0.0, 0.0
+
+    shm_psi = SharedMemory(name = psi_name, create=False, size=np.prod(psi_shape)*16)
+    psi_list = np.ndarray(psi_shape, dtype=np.complex128, buffer=shm_psi.buf)
+
+    n_occupied, n_unoccupied = phi_shape[0], phi_shape[1]
+    shm_phi = SharedMemory(name=phi_name, create=False, size=np.prod(phi_shape)*16)
+    phi_ia = np.ndarray(phi_shape, dtype=np.complex128, buffer=shm_phi.buf)
+
+    shm_op = SharedMemory(name=op_name, create=False, size=phi_shape[-1])
+    op_coul = np.ndarray((-1,), dtype=np.float64, buffer=shm_op.buf)
+
+    shm_mask = SharedMemory(name = mask_name, create=False, size=np.prod(psi_shape[1:]))
+    g2vector_mask = np.ndarray(psi_shape[1:], dtype=bool, buffer=shm_mask.buf)
+
 
     e_d_total = 0.
     e_x_total = 0.
@@ -122,3 +172,91 @@ def get_lmp2_pp(psi_list, phi_ia, tau_list, w_list, eigenvalues, g2vector_mask, 
             e_x_total += e_x * w * op_coul[ng]
 
     return(e_d_total.real, e_x_total.real)
+
+
+def laplace_mp2_energy_pp(psi_list, eigenvalues, g2vector_mask, op_coul, n_occupied, 
+                          tau_list, w_list, n_thread=4):
+
+    from mp2 import get_phi_pp, task_parting, psi_g2r
+    psi_shape = psi_list.shape
+    n_unoccupied = psi_shape[0] - n_occupied
+
+    time_start = time.time()
+    # create the shared memory for psi and psi_r
+    shm_psir = SharedMemory(create=True, size=psi_list.nbytes)
+    shm_psi  = SharedMemory(create=True, size=psi_list.nbytes)
+    tmp_psi = np.ndarray(psi_list.shape, dtype=np.complex128, buffer=shm_psi.buf)
+    tmp_psi[:] = psi_list[:]
+
+    # transform psi from g-space to r-space
+    task_idx_list = task_parting(n_unoccupied+n_occupied, n_thread)   
+    pool = mp.Pool(n_thread)
+    results = [pool.apply_async(psi_g2r, args=(shm_psi.name, shm_psir.name, psi_shape,task_idx_list[i],))  
+                    for i in range(n_thread) ]    
+    pool.close()
+    pool.join()
+    temp2 = np.array([p.get() for p in results])
+
+    # divide the tasks into n_thread parts, each part has approximately n_task/n_thread tasks
+    # the number of unoccupied orbitals is always larger than number of the occupied orbitals
+    task_idx_list = task_parting(n_unoccupied, n_thread)
+
+    # calculate phi_ia in parallel
+    phi_shape = [n_occupied, n_unoccupied, np.sum(g2vector_mask)]
+    
+    # create the shared memory for phi_ia and g2vector_mask
+    shm_phi  = SharedMemory(create=True, size=np.prod(phi_shape)*16)
+    shm_mask = SharedMemory(create=True, size=g2vector_mask.nbytes)
+    tmp_mask = np.ndarray(g2vector_mask.shape, dtype=bool, buffer=shm_mask.buf)
+    tmp_mask[:]=g2vector_mask[:]
+    g2vector_mask = []
+
+
+    # calculate eri in parallel
+    pool = mp.Pool(n_thread)
+    results = [pool.apply_async(get_phi_pp, args=(shm_phi.name, phi_shape, shm_psir.name, 
+                                                  psi_shape, shm_mask.name,  task_idx_list[i],))  
+            for i in range(n_thread) ]    
+    pool.close()
+    pool.join()
+    tmp = np.hstack([p.get() for p in results])
+
+    # get the results
+    time_end = time.time()
+    print("Time used to calculate phi_ia:        {:10d} seconds".format(int(time_end - time_start)))
+    shm_psir.unlink()
+
+
+    # parallel implementation
+
+    # create the shared memory for op_coul
+    shm_op = SharedMemory(create=True, size=op_coul.nbytes)
+    tmp_op = np.ndarray((-1,), dtype=np.float64, buffer=shm_op.buf)
+    tmp_op[:]=op_coul[:]
+    op_coul = []
+
+    task_idx_list = task_parting(len(tmp_op), n_thread)
+
+    time_start = time.time()
+    pool = mp.Pool(n_thread)
+    print(task_idx_list)
+    results = [pool.apply_async(get_lmp2_pp, args=(shm_psi.name, shm_phi.name, shm_mask.name, shm_op.name, 
+                                psi_shape, phi_shape, tau_list, w_list, 
+                                eigenvalues, task_idx_list[i],))  
+        for i in range(n_thread) ]
+
+    pool.close()
+    pool.join()
+    emp2 = np.array([p.get() for p in results])
+    e_d_total, e_x_total = np.sum(emp2, axis=0) 
+    time_end = time.time()
+
+    # release the shared memory
+    shm_psi.unlink()
+    shm_phi.unlink()
+    shm_mask.unlink()
+    shm_op.unlink()
+    
+    time_end = time.time()
+    print("Time used to calculate laplace mp2 energy: {:10d} seconds".format(int(time_end - time_start)))
+    return(e_d_total, e_x_total)

@@ -8,23 +8,23 @@
 以下はコードを実行する例
 
 ```
-# the canonical mp2 method in serial 
+# 標準mp2法
 python src/pwmp2.py -m mp2 
 
-# the canonical mp2 method in parallel using 24 process
+# 24コアで標準mp2法並列計算
 python src/pwmp2.py -m mp2 -n_thread  24
 
-# the laplace transformed mp2 method in in serial 
+# ラプラス変換mp2法
 python src/pwmp2.py -m laplace_mp2 
 
-# the laplace transformed mp2 method in parallel using 24 process
+# 24コアでラプラス変換mp2法並列計算
 python src/pwmp2.py -m laplace_mp2 -n_thread 24
 
 
-# the stochastic orbit mp2 method in serial 
+# 確率軌道mp2法 
 python src/pwmp2.py -m stochastic_mp2 
 
-# the stochastic orbit mp2 method in parallel using 24 process
+# 24コアで確率軌道mp2法並列計算、また合計10000歩の計算を指定
 python src/pwmp2.py -m stochastic_mp2 -n_thread  24 --number_of_stochastic_mp2_steps 10000
 
 ```

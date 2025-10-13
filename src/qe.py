@@ -56,7 +56,8 @@ def read_qe_wavefunction(latt9, grid_point, nband, wfc_hdf5):
         pw_psi_3d[:,ii,jj,kk]=np.conj(pw_psi[:,n])
 
     g2vector_mask = g2vector > -0.5
-    op_coul = 4*np.pi / g2vector[g2vector_mask]
+    op_coul = g2vector[g2vector_mask]
+    op_coul[1:] = 4*np.pi / op_coul[1:]
     # set up the coulomb potential as 0.0 for g^2=0
     op_coul[np.isinf(op_coul)] = 0.0
 

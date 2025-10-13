@@ -10,7 +10,7 @@
                   disk_io = 'low',
             etot_conv_thr = 0.00010000,
             forc_conv_thr = 0.00100000,
-                    nstep = 0,
+                    nstep = 1,
  /                                       
  &SYSTEM  
                     ibrav = 0,
