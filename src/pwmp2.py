@@ -86,7 +86,7 @@ if args.method == 'mp2':
         from mp2 import get_mp2_parallel
         n_thread = args.number_of_threads
         from mp2 import get_phi_pp, task_parting
-        e_d, e_x = get_mp2_parallel(psi_list, eigenvalues, g2vector_mask, op_coul, n_occupied)
+        e_d, e_x = get_mp2_parallel(psi_list, eigenvalues, g2vector_mask, op_coul, n_occupied, n_thread)                                 )
         
     e_d = e_d / volume**2
     e_x = e_x / volume**2
